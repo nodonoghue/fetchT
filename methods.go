@@ -74,11 +74,11 @@ func doRequest[R any](ctx context.Context, client *Client, method string, body i
 
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		body, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(resp.Body)
 		return response, &HTTPError{
 			resp.StatusCode,
 			resp.Status,
-			body,
+			b,
 		}
 	}
 
@@ -91,4 +91,20 @@ func doRequest[R any](ctx context.Context, client *Client, method string, body i
 	}
 
 	return response, nil
+}
+
+func buildRequest(ctx context.Context, client *Client, methodType string, body io.Reader) (*http.Request, error) {
+	req, err := http.NewRequestWithContext(ctx, methodType, client.requestUrl, body)
+	if err != nil {
+		return nil, err
+	}
+
+	//TEMP: will be removed in future update, locks requests to use Content-Type: application/json
+	req.Header.Set("Content-Type", "application/json")
+
+	for key, value := range client.headers {
+		req.Header.Set(key, value)
+	}
+
+	return req, nil
 }

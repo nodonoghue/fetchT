@@ -2,6 +2,7 @@ package fetcht
 
 import (
 	"crypto/tls"
+	"fmt"
 	"net/http"
 	"time"
 )
@@ -17,9 +18,9 @@ type Client struct {
 
 type Option func(*Client)
 
-func WithRequestUrl(baseUrl string) Option {
+func WithRequestUrl(requestUrl string) Option {
 	return func(c *Client) {
-		c.requestUrl = baseUrl
+		c.requestUrl = requestUrl
 	}
 }
 
@@ -29,9 +30,10 @@ func WithHeader(key, value string) Option {
 	}
 }
 
-func WithTimeout(seconds int) Option {
+// WithTimeout sets the timeout duration for a client, defaults to 30 * time.Second
+func WithTimeout(duration time.Duration) Option {
 	return func(c *Client) {
-		c.timeout = time.Duration(seconds) * time.Second
+		c.timeout = duration
 	}
 }
 
@@ -68,4 +70,16 @@ func NewClient(options ...Option) *Client {
 	c.httpClient.Timeout = c.timeout
 
 	return c
+}
+
+func validateClient(client *Client) error {
+	if client.httpClient == nil {
+		return fmt.Errorf("httpClient is required")
+	}
+
+	if client.requestUrl == "" {
+		return fmt.Errorf("requestUrl is required")
+	}
+
+	return nil
 }
