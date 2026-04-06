@@ -2,6 +2,7 @@ package fetcht
 
 import "fmt"
 
+// HTTPError encapsulates any errors from the fetchT library
 type HTTPError struct {
 	StatusCode int
 	Status     string

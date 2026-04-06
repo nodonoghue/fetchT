@@ -18,12 +18,14 @@ type Client struct {
 
 type Option func(*Client)
 
+// WithRequestUrl sets the requestUrl for the client
 func WithRequestUrl(requestUrl string) Option {
 	return func(c *Client) {
 		c.requestUrl = requestUrl
 	}
 }
 
+// WithHeader adds a header to the client
 func WithHeader(key, value string) Option {
 	return func(c *Client) {
 		c.headers[key] = value
@@ -37,18 +39,21 @@ func WithTimeout(duration time.Duration) Option {
 	}
 }
 
+// WithTransport sets the transport options for the client.
 func WithTransport(transport *http.Transport) Option {
 	return func(c *Client) {
 		c.transport = transport
 	}
 }
 
+// WithTLSConfig sets the TLS options for the client's http.Transport
 func WithTLSConfig(config *tls.Config) Option {
 	return func(c *Client) {
 		c.tlsConfig = config
 	}
 }
 
+// NewClient Builds a new http.Client with any included options
 func NewClient(options ...Option) *Client {
 	c := &Client{
 		httpClient: &http.Client{},
