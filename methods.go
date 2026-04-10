@@ -6,45 +6,46 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"net/url"
 )
 
 // Get performs an HTTP GET request and decodes response body into R
 // Note: currently only supports Content-Type: application/json, which is set explicitly
-func Get[R any](ctx context.Context, client *Client) (R, error) {
-	return doWithoutBody[R](ctx, client, http.MethodGet)
+func Get[R any](ctx context.Context, client *Client, opts ...RequestOption) (R, error) {
+	return doWithoutBody[R](ctx, client, http.MethodGet, opts...)
 }
 
 // Delete performs an HTTP DELETE request, encoding any response into R
 // Note: currently only supports Content-type: application/json, which is set explicitly
-func Delete[R any](ctx context.Context, client *Client) (R, error) {
-	return doWithoutBody[R](ctx, client, http.MethodDelete)
+func Delete[R any](ctx context.Context, client *Client, opts ...RequestOption) (R, error) {
+	return doWithoutBody[R](ctx, client, http.MethodDelete, opts...)
 }
 
 // Post performs an HTTP POST request, encoding request of T and decoding response into R
 // Note: currently only supports Content-Type: application/json, which is set explicitly
-func Post[T any, R any](ctx context.Context, client *Client, request T) (R, error) {
-	return doWithBody[T, R](ctx, client, http.MethodPost, request)
+func Post[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (R, error) {
+	return doWithBody[T, R](ctx, client, http.MethodPost, request, opts...)
 }
 
 // Put performs an HTTP PUT request, encoding request of T and decoding response into R
 // Note: currently only supports Content-Type: application/json, which is set explicitly
-func Put[T any, R any](ctx context.Context, client *Client, request T) (R, error) {
-	return doWithBody[T, R](ctx, client, http.MethodPut, request)
+func Put[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (R, error) {
+	return doWithBody[T, R](ctx, client, http.MethodPut, request, opts...)
 }
 
 // Patch performs an HTTP PATCH request, encoding request of T and decoding response into R
 // Note: currently only supports Content-Type: application/json, which is set explicitly
-func Patch[T any, R any](ctx context.Context, client *Client, request T) (R, error) {
-	return doWithBody[T, R](ctx, client, http.MethodPatch, request)
+func Patch[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (R, error) {
+	return doWithBody[T, R](ctx, client, http.MethodPatch, request, opts...)
 }
 
 // There are effectively two distinct code flows for all supported HTTP requests, broken into 3 funcs for minimal
 // code repetition
-func doWithoutBody[R any](ctx context.Context, client *Client, method string) (R, error) {
-	return doRequest[R](ctx, client, method, nil)
+func doWithoutBody[R any](ctx context.Context, client *Client, method string, opts ...RequestOption) (R, error) {
+	return doRequest[R](ctx, client, method, nil, opts...)
 }
 
-func doWithBody[T any, R any](ctx context.Context, client *Client, method string, request T) (R, error) {
+func doWithBody[T any, R any](ctx context.Context, client *Client, method string, request T, opts ...RequestOption) (R, error) {
 	var response R
 
 	jsonData, err := json.Marshal(request)
@@ -52,17 +53,13 @@ func doWithBody[T any, R any](ctx context.Context, client *Client, method string
 		return response, err
 	}
 
-	return doRequest[R](ctx, client, method, bytes.NewBuffer(jsonData))
+	return doRequest[R](ctx, client, method, bytes.NewBuffer(jsonData), opts...)
 }
 
-func doRequest[R any](ctx context.Context, client *Client, method string, body io.Reader) (R, error) {
+func doRequest[R any](ctx context.Context, client *Client, method string, body io.Reader, opts ...RequestOption) (R, error) {
 	var response R
 
-	if err := validateClient(client); err != nil {
-		return response, err
-	}
-
-	req, err := buildRequest(ctx, client, method, body)
+	req, err := buildRequest(ctx, client, method, body, opts...)
 	if err != nil {
 		return response, err
 	}
@@ -93,8 +90,30 @@ func doRequest[R any](ctx context.Context, client *Client, method string, body i
 	return response, nil
 }
 
-func buildRequest(ctx context.Context, client *Client, methodType string, body io.Reader) (*http.Request, error) {
-	req, err := http.NewRequestWithContext(ctx, methodType, client.requestUrl, body)
+func buildRequest(ctx context.Context, client *Client, methodType string, body io.Reader, opts ...RequestOption) (*http.Request, error) {
+	r := &RequestOptions{
+		queryParams: make(map[string]string),
+		headers:     make(map[string]string),
+	}
+	for _, opt := range opts {
+		opt(r)
+	}
+
+	rawURL, err := url.JoinPath(client.baseURL, r.path)
+	if err != nil {
+		return nil, err
+	}
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, err
+	}
+	q := u.Query()
+	for key, value := range r.queryParams {
+		q.Set(key, value)
+	}
+	u.RawQuery = q.Encode()
+
+	req, err := http.NewRequestWithContext(ctx, methodType, u.String(), body)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +122,9 @@ func buildRequest(ctx context.Context, client *Client, methodType string, body i
 	req.Header.Set("Content-Type", "application/json")
 
 	for key, value := range client.headers {
+		req.Header.Set(key, value)
+	}
+	for key, value := range r.headers {
 		req.Header.Set(key, value)
 	}
 

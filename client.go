@@ -2,14 +2,14 @@ package fetcht
 
 import (
 	"crypto/tls"
-	"fmt"
+	"errors"
 	"net/http"
 	"time"
 )
 
 type Client struct {
 	httpClient *http.Client
-	requestUrl string
+	baseURL    string
 	headers    map[string]string
 	transport  *http.Transport
 	tlsConfig  *tls.Config
@@ -18,10 +18,10 @@ type Client struct {
 
 type Option func(*Client)
 
-// WithRequestUrl sets the requestUrl for the client
-func WithRequestUrl(requestUrl string) Option {
+// WithBaseURL sets the requestUrl for the client
+func WithBaseURL(baseURL string) Option {
 	return func(c *Client) {
-		c.requestUrl = requestUrl
+		c.baseURL = baseURL
 	}
 }
 
@@ -54,7 +54,7 @@ func WithTLSConfig(config *tls.Config) Option {
 }
 
 // NewClient Builds a new http.Client with any included options
-func NewClient(options ...Option) *Client {
+func NewClient(options ...Option) (*Client, error) {
 	c := &Client{
 		httpClient: &http.Client{},
 		timeout:    time.Second * 30,
@@ -63,6 +63,10 @@ func NewClient(options ...Option) *Client {
 
 	for _, opt := range options {
 		opt(c)
+	}
+
+	if c.baseURL == "" {
+		return nil, errors.New("base url is required")
 	}
 
 	if c.transport == nil {
@@ -74,17 +78,5 @@ func NewClient(options ...Option) *Client {
 	c.httpClient.Transport = c.transport
 	c.httpClient.Timeout = c.timeout
 
-	return c
-}
-
-func validateClient(client *Client) error {
-	if client.httpClient == nil {
-		return fmt.Errorf("httpClient is required")
-	}
-
-	if client.requestUrl == "" {
-		return fmt.Errorf("requestUrl is required")
-	}
-
-	return nil
+	return c, nil
 }
