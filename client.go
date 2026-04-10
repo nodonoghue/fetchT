@@ -7,6 +7,7 @@ import (
 	"time"
 )
 
+// Client is an HTTP client with default configuration applied to all requests.
 type Client struct {
 	httpClient *http.Client
 	baseURL    string
@@ -16,6 +17,7 @@ type Client struct {
 	timeout    time.Duration
 }
 
+// Option is a functional option for configuring a Client.
 type Option func(*Client)
 
 // WithBaseURL sets the base URL for the client

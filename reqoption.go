@@ -6,6 +6,7 @@ type RequestOptions struct {
 	headers     map[string]string
 }
 
+// RequestOption is a functional option for configuring an individual request.
 type RequestOption func(options *RequestOptions)
 
 // WithPath appends an endpoint path to the client's baseURL for this request.
