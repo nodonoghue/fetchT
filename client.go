@@ -18,14 +18,14 @@ type Client struct {
 
 type Option func(*Client)
 
-// WithBaseURL sets the requestUrl for the client
+// WithBaseURL sets the base URL for the client
 func WithBaseURL(baseURL string) Option {
 	return func(c *Client) {
 		c.baseURL = baseURL
 	}
 }
 
-// WithHeader adds a header to the client
+// WithHeader adds a default header applied to all requests made by this client.
 func WithHeader(key, value string) Option {
 	return func(c *Client) {
 		c.headers[key] = value
@@ -53,7 +53,7 @@ func WithTLSConfig(config *tls.Config) Option {
 	}
 }
 
-// NewClient Builds a new http.Client with any included options
+// NewClient builds and returns a configured Client.  Returns an error if baseURL is not set.
 func NewClient(options ...Option) (*Client, error) {
 	c := &Client{
 		httpClient: &http.Client{},
