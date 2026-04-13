@@ -1,7 +1,6 @@
 package fetcht
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"io"
@@ -42,24 +41,24 @@ func Patch[T any, R any](ctx context.Context, client *Client, request T, opts ..
 // There are effectively two distinct code flows for all supported HTTP requests, broken into 3 funcs for minimal
 // code repetition
 func doWithoutBody[R any](ctx context.Context, client *Client, method string, opts ...RequestOption) (R, error) {
-	return doRequest[R](ctx, client, method, nil, opts...)
+	return doRequest[R](ctx, client, method, nil, "", opts...)
 }
 
 func doWithBody[T any, R any](ctx context.Context, client *Client, method string, request T, opts ...RequestOption) (R, error) {
 	var response R
 
-	jsonData, err := json.Marshal(request)
+	bodyReader, contentType, err := client.encoder.Encode(request)
 	if err != nil {
 		return response, err
 	}
 
-	return doRequest[R](ctx, client, method, bytes.NewBuffer(jsonData), opts...)
+	return doRequest[R](ctx, client, method, bodyReader, contentType, opts...)
 }
 
-func doRequest[R any](ctx context.Context, client *Client, method string, body io.Reader, opts ...RequestOption) (R, error) {
+func doRequest[R any](ctx context.Context, client *Client, method string, body io.Reader, contentType string, opts ...RequestOption) (R, error) {
 	var response R
 
-	req, err := buildRequest(ctx, client, method, body, opts...)
+	req, err := buildRequest(ctx, client, method, body, contentType, opts...)
 	if err != nil {
 		return response, err
 	}
@@ -90,7 +89,7 @@ func doRequest[R any](ctx context.Context, client *Client, method string, body i
 	return response, nil
 }
 
-func buildRequest(ctx context.Context, client *Client, methodType string, body io.Reader, opts ...RequestOption) (*http.Request, error) {
+func buildRequest(ctx context.Context, client *Client, methodType string, body io.Reader, contentType string, opts ...RequestOption) (*http.Request, error) {
 	r := &RequestOptions{
 		queryParams: make(map[string]string),
 		headers:     make(map[string]string),
@@ -118,14 +117,14 @@ func buildRequest(ctx context.Context, client *Client, methodType string, body i
 		return nil, err
 	}
 
-	//TEMP: will be removed in future update, locks requests to use Content-Type: application/json
-	req.Header.Set("Content-Type", "application/json")
-
 	for key, value := range client.headers {
 		req.Header.Set(key, value)
 	}
 	for key, value := range r.headers {
 		req.Header.Set(key, value)
+	}
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
 	}
 
 	return req, nil
