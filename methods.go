@@ -9,31 +9,26 @@ import (
 )
 
 // Get performs an HTTP GET request and decodes response body into R
-// Note: currently only supports Content-Type: application/json, which is set explicitly
 func Get[R any](ctx context.Context, client *Client, opts ...RequestOption) (R, error) {
 	return doWithoutBody[R](ctx, client, http.MethodGet, opts...)
 }
 
 // Delete performs an HTTP DELETE request, encoding any response into R
-// Note: currently only supports Content-type: application/json, which is set explicitly
 func Delete[R any](ctx context.Context, client *Client, opts ...RequestOption) (R, error) {
 	return doWithoutBody[R](ctx, client, http.MethodDelete, opts...)
 }
 
 // Post performs an HTTP POST request, encoding request of T and decoding response into R
-// Note: currently only supports Content-Type: application/json, which is set explicitly
 func Post[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (R, error) {
 	return doWithBody[T, R](ctx, client, http.MethodPost, request, opts...)
 }
 
 // Put performs an HTTP PUT request, encoding request of T and decoding response into R
-// Note: currently only supports Content-Type: application/json, which is set explicitly
 func Put[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (R, error) {
 	return doWithBody[T, R](ctx, client, http.MethodPut, request, opts...)
 }
 
 // Patch performs an HTTP PATCH request, encoding request of T and decoding response into R
-// Note: currently only supports Content-Type: application/json, which is set explicitly
 func Patch[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (R, error) {
 	return doWithBody[T, R](ctx, client, http.MethodPatch, request, opts...)
 }
