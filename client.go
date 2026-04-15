@@ -16,7 +16,7 @@ type Client struct {
 	tlsConfig  *tls.Config
 	timeout    time.Duration
 	encoder    Encoder
-	decoder    Decoder
+	decoders   map[string]Decoder
 }
 
 // Option is a functional option for configuring a Client.
@@ -66,9 +66,11 @@ func WithEncoder(encoder Encoder) Option {
 	}
 }
 
-func WithDecoder(decoder Decoder) Option {
+// WithDecoder adds a decoder, or decoder override to the client's internal decoder
+// registry.
+func WithDecoder(contentType string, decoder Decoder) Option {
 	return func(c *Client) {
-		c.decoder = decoder
+		c.decoders[contentType] = decoder
 	}
 }
 
@@ -79,7 +81,11 @@ func NewClient(options ...Option) (*Client, error) {
 		timeout:    time.Second * 30,
 		headers:    make(map[string]string),
 		encoder:    jsonEncoder{},
-		decoder:    jsonDecoder{},
+		decoders: map[string]Decoder{
+			"application/json": jsonDecoder{},
+			"application/xml":  xmlDecoder{},
+			"text/xml":         xmlDecoder{},
+		},
 	}
 
 	for _, opt := range options {

@@ -2,8 +2,10 @@ package fetcht
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 )
@@ -66,20 +68,61 @@ func doRequest[R any](ctx context.Context, client *Client, method string, body i
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		b, err := io.ReadAll(resp.Body)
-		return response, &HTTPError{
+		httpErr := &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
 			Body:       b,
-			Err:        fmt.Errorf("failed to read HTTP response body for status %d: %w", resp.StatusCode, err),
 		}
+
+		if err != nil {
+			httpErr.Err = fmt.Errorf("failed to read HTTP response body for status %d: %w", resp.StatusCode, err)
+		}
+
+		return response, httpErr
 	}
 
 	if resp.StatusCode == http.StatusNoContent {
 		return response, nil
 	}
 
-	if err := client.decoder.Decode(resp.Body, &response); err != nil {
-		return response, err
+	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
+	if mediaType == "" {
+		b, _ := io.ReadAll(resp.Body)
+		return response, &HTTPError{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Body:       b,
+			Err:        errors.New("server response did not include a Content-Type header"),
+		}
+	}
+	if err != nil {
+		b, _ := io.ReadAll(resp.Body)
+		return response, &HTTPError{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Body:       b,
+			Err:        fmt.Errorf("failed to parse content type from server response: %w", err),
+		}
+	}
+
+	decoder, ok := client.decoders[mediaType]
+	if !ok {
+		b, _ := io.ReadAll(resp.Body)
+		return response, &HTTPError{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Body:       b,
+			Err:        fmt.Errorf("no registered decoders for %s, register one using WithDecoder()", mediaType),
+		}
+	}
+
+	if err := decoder.Decode(resp.Body, &response); err != nil {
+		return response, &HTTPError{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Body:       nil,
+			Err:        fmt.Errorf("failed to decode response body for status %d: %w", resp.StatusCode, err),
+		}
 	}
 
 	return response, nil

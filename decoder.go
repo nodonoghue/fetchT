@@ -21,19 +21,11 @@ type Decoder interface {
 type jsonDecoder struct{}
 
 func (d jsonDecoder) Decode(r io.Reader, v any) error {
-	if err := json.NewDecoder(r).Decode(v); err != nil {
-		return err
-	}
-
-	return nil
+	return json.NewDecoder(r).Decode(v)
 }
 
 type xmlDecoder struct{}
 
 func (x xmlDecoder) Decode(r io.Reader, v any) error {
-	if err := xml.NewDecoder(r).Decode(v); err != nil {
-		return err
-	}
-
-	return nil
+	return xml.NewDecoder(r).Decode(v)
 }
