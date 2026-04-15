@@ -2,7 +2,7 @@ package fetcht
 
 import (
 	"context"
-	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -62,14 +62,15 @@ func doRequest[R any](ctx context.Context, client *Client, method string, body i
 	if err != nil {
 		return response, err
 	}
-
 	defer resp.Body.Close()
+
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		b, _ := io.ReadAll(resp.Body)
+		b, err := io.ReadAll(resp.Body)
 		return response, &HTTPError{
-			resp.StatusCode,
-			resp.Status,
-			b,
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Body:       b,
+			Err:        fmt.Errorf("failed to read HTTP response body for status %d: %w", resp.StatusCode, err),
 		}
 	}
 
@@ -77,7 +78,7 @@ func doRequest[R any](ctx context.Context, client *Client, method string, body i
 		return response, nil
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
+	if err := client.decoder.Decode(resp.Body, &response); err != nil {
 		return response, err
 	}
 

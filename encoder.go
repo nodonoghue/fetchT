@@ -13,10 +13,10 @@ import (
 )
 
 var (
-	JSON      Encoder = jsonEncoder{}
-	XML       Encoder = xmlEncoder{}
-	Form      Encoder = formEncoder{}
-	Multipart Encoder = multipartEncoder{}
+	JSONEncoder      Encoder = jsonEncoder{}
+	XMLEncoder       Encoder = xmlEncoder{}
+	FormEncoder      Encoder = formEncoder{}
+	MultipartEncoder Encoder = multipartEncoder{}
 )
 
 // Encoder is an interface that can be used to implement your own encoder.
@@ -57,13 +57,17 @@ func (e xmlEncoder) Encode(v any) (io.Reader, string, error) {
 	return bytes.NewReader(x), "application/xml; charset=utf-8", nil
 }
 
+type FilePart struct {
+	Reader io.Reader
+	Name   string
+}
 type MultipartForm struct {
 	Fields map[string]string
-	Files  map[string]io.Reader
+	Files  map[string]FilePart
 }
 type multipartEncoder struct{}
 
-func (e multipartEncoder) Encode(v any) (io.Reader, string, error) {
+func (e multipartEncoder) Encode(v any) (bodyReader io.Reader, contentType string, err error) {
 	form, ok := v.(MultipartForm)
 	if !ok {
 		return nil, "", fmt.Errorf("MultipartEncoder expects MultipartForm, got %T", v)
@@ -72,18 +76,35 @@ func (e multipartEncoder) Encode(v any) (io.Reader, string, error) {
 	var buf bytes.Buffer
 	writer := multipart.NewWriter(&buf)
 
-	for key, val := range form.Fields {
-		writer.WriteField(key, val)
-	}
-
-	for fieldName, reader := range form.Files {
-		part, err := writer.CreateFormFile(fieldName, fieldName)
-		if err != nil {
-			return nil, "", err
+	defer func() {
+		if closeErr := writer.Close(); closeErr != nil {
+			if err == nil {
+				err = fmt.Errorf("MultipartEncoder failed to close multipart writer: %v", closeErr)
+			} else {
+				err = fmt.Errorf("%w, failed to close multipart writer: %v", err, closeErr)
+			}
 		}
-		io.Copy(part, reader)
+	}()
+
+	for key, val := range form.Fields {
+		if err = writer.WriteField(key, val); err != nil {
+			return
+		}
 	}
 
-	writer.Close()
-	return &buf, writer.FormDataContentType(), nil
+	for fieldName, filePart := range form.Files {
+		var part io.Writer
+		part, err = writer.CreateFormFile(fieldName, filePart.Name)
+		if err != nil {
+			return
+		}
+		if _, err = io.Copy(part, filePart.Reader); err != nil {
+			return
+		}
+	}
+
+	bodyReader = &buf
+	contentType = writer.FormDataContentType()
+
+	return
 }
