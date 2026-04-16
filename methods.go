@@ -55,7 +55,7 @@ func doWithBody[T any, R any](ctx context.Context, client *Client, method string
 func doRequest[R any](ctx context.Context, client *Client, method string, body io.Reader, contentType string, opts ...RequestOption) (R, error) {
 	var response R
 
-	req, err := buildRequest(ctx, client, method, body, contentType, opts...)
+	req, reqOptions, err := buildRequest(ctx, client, method, body, contentType, opts...)
 	if err != nil {
 		return response, err
 	}
@@ -105,7 +105,7 @@ func doRequest[R any](ctx context.Context, client *Client, method string, body i
 		}
 	}
 
-	decoder, ok := client.decoders[mediaType]
+	decoder, ok := reqOptions.decoders[mediaType]
 	if !ok {
 		b, _ := io.ReadAll(resp.Body)
 		return response, &HTTPError{
@@ -128,10 +128,15 @@ func doRequest[R any](ctx context.Context, client *Client, method string, body i
 	return response, nil
 }
 
-func buildRequest(ctx context.Context, client *Client, methodType string, body io.Reader, contentType string, opts ...RequestOption) (*http.Request, error) {
+func buildRequest(ctx context.Context, client *Client, methodType string, body io.Reader, contentType string, opts ...RequestOption) (*http.Request, *RequestOptions, error) {
 	r := &RequestOptions{
 		queryParams: make(map[string]string),
 		headers:     make(map[string]string),
+		decoders: map[string]Decoder{
+			"application/json": jsonDecoder{},
+			"application/xml":  xmlDecoder{},
+			"text/xml":         xmlDecoder{},
+		},
 	}
 	for _, opt := range opts {
 		opt(r)
@@ -139,11 +144,11 @@ func buildRequest(ctx context.Context, client *Client, methodType string, body i
 
 	rawURL, err := url.JoinPath(client.baseURL, r.path)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	q := u.Query()
 	for key, value := range r.queryParams {
@@ -153,7 +158,7 @@ func buildRequest(ctx context.Context, client *Client, methodType string, body i
 
 	req, err := http.NewRequestWithContext(ctx, methodType, u.String(), body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	for key, value := range client.headers {
@@ -166,5 +171,5 @@ func buildRequest(ctx context.Context, client *Client, methodType string, body i
 		req.Header.Set("Content-Type", contentType)
 	}
 
-	return req, nil
+	return req, r, nil
 }

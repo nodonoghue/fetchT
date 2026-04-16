@@ -4,6 +4,7 @@ type RequestOptions struct {
 	path        string
 	queryParams map[string]string
 	headers     map[string]string
+	decoders    map[string]Decoder
 }
 
 // RequestOption is a functional option for configuring an individual request.
@@ -27,5 +28,13 @@ func WithQueryParams(key, value string) RequestOption {
 func WithHeaders(key, value string) RequestOption {
 	return func(r *RequestOptions) {
 		r.headers[key] = value
+	}
+}
+
+// WithDecoder adds a decoder, or overrides a registered decoder in the internal decoder
+// registry.
+func WithDecoder(contentType string, decoder Decoder) RequestOption {
+	return func(c *RequestOptions) {
+		c.decoders[contentType] = decoder
 	}
 }
