@@ -4,6 +4,7 @@ type RequestOptions struct {
 	path        string
 	queryParams map[string]string
 	headers     map[string]string
+	encoder     Encoder
 	decoders    map[string]Decoder
 }
 
@@ -28,6 +29,15 @@ func WithQueryParams(key, value string) RequestOption {
 func WithHeaders(key, value string) RequestOption {
 	return func(r *RequestOptions) {
 		r.headers[key] = value
+	}
+}
+
+// WithEncoder sets the content type encoder for this request, this will also
+// set the content-type header value, any user added content-type headers
+// will be overridden by the encoder.
+func WithEncoder(encoder Encoder) RequestOption {
+	return func(r *RequestOptions) {
+		r.encoder = encoder
 	}
 }
 

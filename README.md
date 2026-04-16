@@ -40,8 +40,6 @@ All configuration is passed to `NewClient` as functional options. `NewClient` re
 | `WithTimeout(d time.Duration)` | Sets the request timeout. Default: 30s. |
 | `WithTransport(t *http.Transport)` | Replaces the default HTTP transport. |
 | `WithTLSConfig(c *tls.Config)` | Configures TLS on the client's transport. |
-| `WithEncoder(e Encoder)` | Sets the request body encoder. Default: JSON. |
-| `WithDecoder(contentType string, d Decoder)` | Adds or overrides a decoder for a response content type. |
 
 ```go
 client, err := fetcht.NewClient(
@@ -109,6 +107,8 @@ Each request function accepts `...RequestOption` to configure that individual ca
 | `WithPath(path string)` | Appends a path to the client's base URL. |
 | `WithQueryParams(key, value string)` | Adds a query string parameter. Repeatable. |
 | `WithHeaders(key, value string)` | Adds a per-request header, overriding any client-level default with the same key. |
+| `WithEncoder(e Encoder)` | Sets the request body encoder for this request. Default: JSON. |
+| `WithDecoder(contentType string, d Decoder)` | Adds or overrides a decoder in the registry for this request. |
 
 ```go
 users, err := fetcht.Get[[]User](ctx, client,
@@ -121,7 +121,7 @@ users, err := fetcht.Get[[]User](ctx, client,
 
 ## Encoding Requests
 
-The encoder is set on the client via `WithEncoder` and applies to all request bodies sent by that client. The encoder also sets the `Content-Type` header automatically — any manually set `Content-Type` header will be overridden.
+The encoder is set per-request via `WithEncoder`. If not specified, JSON is used. The encoder also sets the `Content-Type` header automatically — any manually set `Content-Type` header will be overridden.
 
 Built-in encoders:
 
@@ -163,12 +163,12 @@ Built-in decoders registered by default:
 | `application/xml` | `fetcht.XMLDecoder` |
 | `text/xml` | `fetcht.XMLDecoder` |
 
-Additional decoders can be registered with `WithDecoder`. This is also how you override a built-in, or alias one MIME type to an existing decoder:
+Additional decoders can be registered per-request with `WithDecoder`. This is also how you override a built-in, or alias one MIME type to an existing decoder:
 
 ```go
 // Register a custom decoder for a vendor media type
-client, err := fetcht.NewClient(
-    fetcht.WithBaseURL("https://api.example.com"),
+resp, err := fetcht.Get[MyType](ctx, client,
+    fetcht.WithPath("/resource"),
     fetcht.WithDecoder("application/vnd.api+json", fetcht.JSONDecoder),
 )
 ```
@@ -211,6 +211,5 @@ if err != nil {
 
 ## Known Limitations
 
-- **Encoder is client-level, not per-request.** If an API requires both JSON and form-encoded endpoints, use two separate clients with different encoders.
 - **204 No Content returns the zero value of `R`.** When `R` is a struct, the returned value is indistinguishable from a successful response with an empty body. Use a pointer type (`*MyStruct`) if you need to tell the two apart — a nil pointer unambiguously means no content.
 - **`go-querystring` dependency.** `FormEncoder` depends on `github.com/google/go-querystring`. The library is not pure stdlib.

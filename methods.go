@@ -35,27 +35,25 @@ func Patch[T any, R any](ctx context.Context, client *Client, request T, opts ..
 	return doWithBody[T, R](ctx, client, http.MethodPatch, request, opts...)
 }
 
-// There are effectively two distinct code flows for all supported HTTP requests, broken into 3 funcs for minimal
+// There are effectively two distinct code flows for all supported HTTP requests, broken into 4 funcs for minimal
 // code repetition
 func doWithoutBody[R any](ctx context.Context, client *Client, method string, opts ...RequestOption) (R, error) {
-	return doRequest[R](ctx, client, method, nil, "", opts...)
-}
-
-func doWithBody[T any, R any](ctx context.Context, client *Client, method string, request T, opts ...RequestOption) (R, error) {
 	var response R
 
-	bodyReader, contentType, err := client.encoder.Encode(request)
-	if err != nil {
-		return response, err
+	reqOptions := &RequestOptions{
+		queryParams: make(map[string]string),
+		headers:     make(map[string]string),
+		decoders: map[string]Decoder{
+			"application/json": JSONDecoder,
+			"application/xml":  XMLDecoder,
+			"text/xml":         XMLDecoder,
+		},
+	}
+	for _, opt := range opts {
+		opt(reqOptions)
 	}
 
-	return doRequest[R](ctx, client, method, bodyReader, contentType, opts...)
-}
-
-func doRequest[R any](ctx context.Context, client *Client, method string, body io.Reader, contentType string, opts ...RequestOption) (R, error) {
-	var response R
-
-	req, reqOptions, err := buildRequest(ctx, client, method, body, contentType, opts...)
+	req, err := buildRequest(ctx, client, method, nil, "", reqOptions)
 	if err != nil {
 		return response, err
 	}
@@ -64,7 +62,46 @@ func doRequest[R any](ctx context.Context, client *Client, method string, body i
 	if err != nil {
 		return response, err
 	}
+	return handleResponse[R](resp, reqOptions)
+}
+
+func doWithBody[T any, R any](ctx context.Context, client *Client, method string, request T, opts ...RequestOption) (R, error) {
+	var response R
+
+	reqOptions := &RequestOptions{
+		queryParams: make(map[string]string),
+		headers:     make(map[string]string),
+		encoder:     JSONEncoder,
+		decoders: map[string]Decoder{
+			"application/json": JSONDecoder,
+			"application/xml":  XMLDecoder,
+			"text/xml":         XMLDecoder,
+		},
+	}
+	for _, opt := range opts {
+		opt(reqOptions)
+	}
+
+	bodyReader, contentType, err := reqOptions.encoder.Encode(request)
+	if err != nil {
+		return response, err
+	}
+
+	req, err := buildRequest(ctx, client, method, bodyReader, contentType, reqOptions)
+	if err != nil {
+		return response, err
+	}
+
+	resp, err := client.httpClient.Do(req)
+	if err != nil {
+		return response, err
+	}
+	return handleResponse[R](resp, reqOptions)
+}
+
+func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (R, error) {
 	defer resp.Body.Close()
+	var response R
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		b, err := io.ReadAll(resp.Body)
@@ -128,48 +165,35 @@ func doRequest[R any](ctx context.Context, client *Client, method string, body i
 	return response, nil
 }
 
-func buildRequest(ctx context.Context, client *Client, methodType string, body io.Reader, contentType string, opts ...RequestOption) (*http.Request, *RequestOptions, error) {
-	r := &RequestOptions{
-		queryParams: make(map[string]string),
-		headers:     make(map[string]string),
-		decoders: map[string]Decoder{
-			"application/json": jsonDecoder{},
-			"application/xml":  xmlDecoder{},
-			"text/xml":         xmlDecoder{},
-		},
-	}
-	for _, opt := range opts {
-		opt(r)
-	}
-
-	rawURL, err := url.JoinPath(client.baseURL, r.path)
+func buildRequest(ctx context.Context, client *Client, methodType string, body io.Reader, contentType string, reqOptions *RequestOptions) (*http.Request, error) {
+	rawURL, err := url.JoinPath(client.baseURL, reqOptions.path)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	u, err := url.Parse(rawURL)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	q := u.Query()
-	for key, value := range r.queryParams {
+	for key, value := range reqOptions.queryParams {
 		q.Set(key, value)
 	}
 	u.RawQuery = q.Encode()
 
 	req, err := http.NewRequestWithContext(ctx, methodType, u.String(), body)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	for key, value := range client.headers {
 		req.Header.Set(key, value)
 	}
-	for key, value := range r.headers {
+	for key, value := range reqOptions.headers {
 		req.Header.Set(key, value)
 	}
 	if contentType != "" {
 		req.Header.Set("Content-Type", contentType)
 	}
 
-	return req, r, nil
+	return req, nil
 }

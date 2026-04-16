@@ -15,7 +15,6 @@ type Client struct {
 	transport  *http.Transport
 	tlsConfig  *tls.Config
 	timeout    time.Duration
-	encoder    Encoder
 }
 
 // Option is a functional option for configuring a Client.
@@ -56,22 +55,12 @@ func WithTLSConfig(config *tls.Config) Option {
 	}
 }
 
-// WithEncoder sets the content type encoder for the client, this will also
-// set the content-type header value, any user added content-type headers
-// will be overridden by the encoder.
-func WithEncoder(encoder Encoder) Option {
-	return func(c *Client) {
-		c.encoder = encoder
-	}
-}
-
 // NewClient builds and returns a configured Client.  Returns an error if baseURL is not set.
 func NewClient(options ...Option) (*Client, error) {
 	c := &Client{
 		httpClient: &http.Client{},
 		timeout:    time.Second * 30,
 		headers:    make(map[string]string),
-		encoder:    jsonEncoder{},
 	}
 
 	for _, opt := range options {
