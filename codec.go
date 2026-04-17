@@ -13,11 +13,33 @@ import (
 )
 
 var (
+	JSONDecoder Decoder = jsonDecoder{}
+	XMLDecoder  Decoder = xmlDecoder{}
+
 	JSONEncoder      Encoder = jsonEncoder{}
 	XMLEncoder       Encoder = xmlEncoder{}
 	FormEncoder      Encoder = formEncoder{}
 	MultipartEncoder Encoder = multipartEncoder{}
 )
+
+// Decoder is an interface that can be used to implement your own decoder.
+// application/json, application/xml, text/xml are included, but can be
+// overridden with your own implementation
+type Decoder interface {
+	Decode(r io.Reader, v any) error
+}
+
+type jsonDecoder struct{}
+
+func (d jsonDecoder) Decode(r io.Reader, v any) error {
+	return json.NewDecoder(r).Decode(v)
+}
+
+type xmlDecoder struct{}
+
+func (x xmlDecoder) Decode(r io.Reader, v any) error {
+	return xml.NewDecoder(r).Decode(v)
+}
 
 // Encoder is an interface that can be used to implement your own encoder.
 // application/json, application/xml; charset=utf-8, application/x-www-form-urlencoded,

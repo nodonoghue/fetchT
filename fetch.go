@@ -1,6 +1,7 @@
 package fetcht
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,36 +11,96 @@ import (
 	"net/url"
 )
 
+// Response contains the decoded response body and metadata from the HTTP response.
+type Response[R any] struct {
+	Data          R
+	StatusCode    int
+	Status        string
+	Proto         string
+	Header        http.Header
+	Cookies       []*http.Cookie
+	Request       *http.Request
+	ContentLength int64
+	RawBody       []byte
+}
+
+type RequestOptions struct {
+	path        string
+	queryParams map[string]string
+	headers     map[string]string
+	encoder     Encoder
+	decoders    map[string]Decoder
+}
+
+// RequestOption is a functional option for configuring an individual request.
+type RequestOption func(options *RequestOptions)
+
+// WithPath appends an endpoint path to the client's baseURL for this request.
+func WithPath(path string) RequestOption {
+	return func(r *RequestOptions) {
+		r.path = path
+	}
+}
+
+// WithQueryParams adds a query string key-value pair to the request URL.
+func WithQueryParams(key, value string) RequestOption {
+	return func(r *RequestOptions) {
+		r.queryParams[key] = value
+	}
+}
+
+// WithHeaders adds a per-request header, overriding any client-level header with the same key.
+func WithHeaders(key, value string) RequestOption {
+	return func(r *RequestOptions) {
+		r.headers[key] = value
+	}
+}
+
+// WithEncoder sets the content type encoder for this request, this will also
+// set the content-type header value, any user added content-type headers
+// will be overridden by the encoder.
+func WithEncoder(encoder Encoder) RequestOption {
+	return func(r *RequestOptions) {
+		r.encoder = encoder
+	}
+}
+
+// WithDecoder adds a decoder, or overrides a registered decoder in the internal decoder
+// registry.
+func WithDecoder(contentType string, decoder Decoder) RequestOption {
+	return func(c *RequestOptions) {
+		c.decoders[contentType] = decoder
+	}
+}
+
 // Get performs an HTTP GET request and decodes response body into R
-func Get[R any](ctx context.Context, client *Client, opts ...RequestOption) (R, error) {
+func Get[R any](ctx context.Context, client *Client, opts ...RequestOption) (*Response[R], error) {
 	return doWithoutBody[R](ctx, client, http.MethodGet, opts...)
 }
 
 // Delete performs an HTTP DELETE request, encoding any response into R
-func Delete[R any](ctx context.Context, client *Client, opts ...RequestOption) (R, error) {
+func Delete[R any](ctx context.Context, client *Client, opts ...RequestOption) (*Response[R], error) {
 	return doWithoutBody[R](ctx, client, http.MethodDelete, opts...)
 }
 
 // Post performs an HTTP POST request, encoding request of T and decoding response into R
-func Post[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (R, error) {
+func Post[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (*Response[R], error) {
 	return doWithBody[T, R](ctx, client, http.MethodPost, request, opts...)
 }
 
 // Put performs an HTTP PUT request, encoding request of T and decoding response into R
-func Put[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (R, error) {
+func Put[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (*Response[R], error) {
 	return doWithBody[T, R](ctx, client, http.MethodPut, request, opts...)
 }
 
 // Patch performs an HTTP PATCH request, encoding request of T and decoding response into R
-func Patch[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (R, error) {
+func Patch[T any, R any](ctx context.Context, client *Client, request T, opts ...RequestOption) (*Response[R], error) {
 	return doWithBody[T, R](ctx, client, http.MethodPatch, request, opts...)
 }
 
 // There are effectively two distinct code flows for all supported HTTP requests, broken into 4 funcs for minimal
 // code repetition
-func doWithoutBody[R any](ctx context.Context, client *Client, method string, opts ...RequestOption) (R, error) {
-	var response R
-
+func doWithoutBody[R any](ctx context.Context, client *Client, method string, opts ...RequestOption) (*Response[R], error) {
 	reqOptions := &RequestOptions{
 		queryParams: make(map[string]string),
 		headers:     make(map[string]string),
@@ -55,19 +116,17 @@ func doWithoutBody[R any](ctx context.Context, client *Client, method string, op
 
 	req, err := buildRequest(ctx, client, method, nil, "", reqOptions)
 	if err != nil {
-		return response, err
+		return nil, err
 	}
 
 	resp, err := client.httpClient.Do(req)
 	if err != nil {
-		return response, err
+		return nil, err
 	}
 	return handleResponse[R](resp, reqOptions)
 }
 
-func doWithBody[T any, R any](ctx context.Context, client *Client, method string, request T, opts ...RequestOption) (R, error) {
-	var response R
-
+func doWithBody[T any, R any](ctx context.Context, client *Client, method string, request T, opts ...RequestOption) (*Response[R], error) {
 	reqOptions := &RequestOptions{
 		queryParams: make(map[string]string),
 		headers:     make(map[string]string),
@@ -84,38 +143,50 @@ func doWithBody[T any, R any](ctx context.Context, client *Client, method string
 
 	bodyReader, contentType, err := reqOptions.encoder.Encode(request)
 	if err != nil {
-		return response, err
+		return nil, err
 	}
 
 	req, err := buildRequest(ctx, client, method, bodyReader, contentType, reqOptions)
 	if err != nil {
-		return response, err
+		return nil, err
 	}
 
 	resp, err := client.httpClient.Do(req)
 	if err != nil {
-		return response, err
+		return nil, err
 	}
 	return handleResponse[R](resp, reqOptions)
 }
 
-func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (R, error) {
+func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (*Response[R], error) {
 	defer resp.Body.Close()
-	var response R
+
+	b, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, &HTTPError{
+			StatusCode: resp.StatusCode,
+			Status:     resp.Status,
+			Err:        fmt.Errorf("failed to read HTTP response body: %w", err),
+		}
+	}
+
+	response := &Response[R]{
+		StatusCode:    resp.StatusCode,
+		Status:        resp.Status,
+		Proto:         resp.Proto,
+		Header:        resp.Header,
+		Cookies:       resp.Cookies(),
+		Request:       resp.Request,
+		ContentLength: resp.ContentLength,
+		RawBody:       b,
+	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
-		b, err := io.ReadAll(resp.Body)
-		httpErr := &HTTPError{
+		return response, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
 			Body:       b,
 		}
-
-		if err != nil {
-			httpErr.Err = fmt.Errorf("failed to read HTTP response body for status %d: %w", resp.StatusCode, err)
-		}
-
-		return response, httpErr
 	}
 
 	if resp.StatusCode == http.StatusNoContent {
@@ -124,7 +195,6 @@ func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (R, 
 
 	mediaType, _, err := mime.ParseMediaType(resp.Header.Get("Content-Type"))
 	if mediaType == "" {
-		b, _ := io.ReadAll(resp.Body)
 		return response, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
@@ -133,7 +203,6 @@ func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (R, 
 		}
 	}
 	if err != nil {
-		b, _ := io.ReadAll(resp.Body)
 		return response, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
@@ -144,7 +213,6 @@ func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (R, 
 
 	decoder, ok := reqOptions.decoders[mediaType]
 	if !ok {
-		b, _ := io.ReadAll(resp.Body)
 		return response, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
@@ -153,11 +221,11 @@ func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (R, 
 		}
 	}
 
-	if err := decoder.Decode(resp.Body, &response); err != nil {
+	if err := decoder.Decode(bytes.NewReader(b), &response.Data); err != nil {
 		return response, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
-			Body:       nil,
+			Body:       b,
 			Err:        fmt.Errorf("failed to decode response body for status %d: %w", resp.StatusCode, err),
 		}
 	}
@@ -196,4 +264,19 @@ func buildRequest(ctx context.Context, client *Client, methodType string, body i
 	}
 
 	return req, nil
+}
+
+// HTTPError encapsulates any errors from the fetchT library
+type HTTPError struct {
+	StatusCode int
+	Status     string
+	Body       []byte
+	Err        error
+}
+
+func (e *HTTPError) Error() string {
+	if e.Err != nil {
+		return fmt.Sprintf("HTTP error: %d %s: %s: %v", e.StatusCode, e.Status, string(e.Body), e.Err)
+	}
+	return fmt.Sprintf("HTTP error: %d %s: %s", e.StatusCode, e.Status, e.Body)
 }

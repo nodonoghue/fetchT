@@ -26,7 +26,10 @@ type User struct {
     Name string `json:"name"`
 }
 
-user, err := fetcht.Get[User](ctx, client, fetcht.WithPath("/users/1"))
+resp, err := fetcht.Get[User](ctx, client, fetcht.WithPath("/users/1"))
+if err == nil {
+    fmt.Printf("User: %s\n", resp.Data.Name)
+}
 ```
 
 ## Client Configuration
@@ -51,19 +54,37 @@ client, err := fetcht.NewClient(
 
 ## Making Requests
 
-All request functions are free functions parameterised on the response type `R`. Functions that send a body are also parameterised on the request type `T`.
+All request functions are free functions parameterised on the response type `R`. Functions that send a body are also parameterised on the request type `T`. They return a `*Response[R]` containing the decoded data and response metadata.
 
 ```go
 // GET — no request body
-Get[R any](ctx, client, ...RequestOption) (R, error)
+Get[R any](ctx, client, ...RequestOption) (*Response[R], error)
 
 // DELETE — no request body
-Delete[R any](ctx, client, ...RequestOption) (R, error)
+Delete[R any](ctx, client, ...RequestOption) (*Response[R], error)
 
 // POST / PUT / PATCH — encodes request body
-Post[T, R any](ctx, client, request T, ...RequestOption) (R, error)
-Put[T, R any](ctx, client, request T, ...RequestOption) (R, error)
-Patch[T, R any](ctx, client, request T, ...RequestOption) (R, error)
+Post[T, R any](ctx, client, request T, ...RequestOption) (*Response[R], error)
+Put[T, R any](ctx, client, request T, ...RequestOption) (*Response[R], error)
+Patch[T, R any](ctx, client, request T, ...RequestOption) (*Response[R], error)
+```
+
+### The Response Struct
+
+The `Response[R]` struct provides access to the decoded data and HTTP metadata:
+
+```go
+type Response[R any] struct {
+    Data          R              // Decoded response body
+    StatusCode    int            // HTTP status code (e.g. 200)
+    Status        string         // HTTP status text (e.g. "200 OK")
+    Proto         string         // Protocol version (e.g. "HTTP/1.1")
+    Header        http.Header    // Response headers
+    Cookies       []*http.Cookie // Response cookies
+    Request       *http.Request  // The final request object
+    ContentLength int64          // Value of Content-Length header
+    RawBody       []byte         // Raw un-decoded response body
+}
 ```
 
 > **Note:** Go does not allow generic methods with new type parameters on a receiver, so these are package-level functions rather than methods on `Client`. This is a known language constraint, not a design choice.
@@ -77,7 +98,10 @@ type Product struct {
     Title string `json:"title"`
 }
 
-product, err := fetcht.Get[Product](ctx, client, fetcht.WithPath("/products/42"))
+resp, err := fetcht.Get[Product](ctx, client, fetcht.WithPath("/products/42"))
+if err == nil {
+    fmt.Printf("Product: %s (Status: %d)\n", resp.Data.Title, resp.StatusCode)
+}
 
 // POST
 type CreateOrder struct {
@@ -89,13 +113,13 @@ type OrderResponse struct {
     Status  string `json:"status"`
 }
 
-resp, err := fetcht.Post[CreateOrder, OrderResponse](ctx, client,
+resp, err = fetcht.Post[CreateOrder, OrderResponse](ctx, client,
     CreateOrder{ProductID: 42, Quantity: 2},
     fetcht.WithPath("/orders"),
 )
 
 // DELETE with no meaningful response body
-_, err = fetcht.Delete[struct{}](ctx, client, fetcht.WithPath("/orders/99"))
+resp, err = fetcht.Delete[struct{}](ctx, client, fetcht.WithPath("/orders/99"))
 ```
 
 ## Per-Request Options
@@ -185,7 +209,7 @@ If the server response is missing a `Content-Type` header, or sends a MIME type 
 
 ## Error Handling
 
-All non-2xx responses and decode-path failures return `*HTTPError`:
+All non-2xx responses and decode-path failures return `*HTTPError`. Note that even on error, a `*Response[R]` may be returned containing whatever metadata was available before the failure.
 
 ```go
 type HTTPError struct {
@@ -199,7 +223,7 @@ type HTTPError struct {
 Use `errors.As` to inspect HTTP errors:
 
 ```go
-user, err := fetcht.Get[User](ctx, client, fetcht.WithPath("/users/1"))
+resp, err := fetcht.Get[User](ctx, client, fetcht.WithPath("/users/1"))
 if err != nil {
     var httpErr *fetcht.HTTPError
     if errors.As(err, &httpErr) {
