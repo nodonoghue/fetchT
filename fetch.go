@@ -22,6 +22,7 @@ type Response[R any] struct {
 	Request       *http.Request
 	ContentLength int64
 	RawBody       []byte
+	HasBody       bool
 }
 
 type RequestOptions struct {
@@ -161,12 +162,16 @@ func doWithBody[T any, R any](ctx context.Context, client *Client, method string
 func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (*Response[R], error) {
 	defer resp.Body.Close()
 
-	b, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, &HTTPError{
-			StatusCode: resp.StatusCode,
-			Status:     resp.Status,
-			Err:        fmt.Errorf("failed to read HTTP response body: %w", err),
+	var b []byte
+	var err error
+	if resp.ContentLength != 0 {
+		b, err = io.ReadAll(resp.Body)
+		if err != nil {
+			return nil, &HTTPError{
+				StatusCode: resp.StatusCode,
+				Status:     resp.Status,
+				Err:        fmt.Errorf("failed to read HTTP response body: %w", err),
+			}
 		}
 	}
 
@@ -179,6 +184,7 @@ func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (*Re
 		Request:       resp.Request,
 		ContentLength: resp.ContentLength,
 		RawBody:       b,
+		HasBody:       len(b) > 0,
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
@@ -189,7 +195,7 @@ func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (*Re
 		}
 	}
 
-	if resp.StatusCode == http.StatusNoContent {
+	if !response.HasBody {
 		return response, nil
 	}
 
