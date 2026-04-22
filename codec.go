@@ -22,6 +22,12 @@ var (
 	MultipartEncoder Encoder = multipartEncoder{}
 )
 
+var defaultDecoders = map[string]Decoder{
+	"application/json": JSONDecoder,
+	"application/xml":  XMLDecoder,
+	"text/xml":         XMLDecoder,
+}
+
 // Decoder is an interface that can be used to implement your own decoder.
 // application/json, application/xml, text/xml are included, but can be
 // overridden with your own implementation

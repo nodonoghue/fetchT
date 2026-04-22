@@ -3,6 +3,7 @@ package fetcht
 import (
 	"crypto/tls"
 	"errors"
+	"maps"
 	"net/http"
 	"time"
 )
@@ -12,6 +13,7 @@ type Client struct {
 	httpClient *http.Client
 	baseURL    string
 	headers    map[string]string
+	decoders   map[string]Decoder
 	transport  *http.Transport
 	tlsConfig  *tls.Config
 	timeout    time.Duration
@@ -24,6 +26,13 @@ type Option func(*Client)
 func WithBaseURL(baseURL string) Option {
 	return func(c *Client) {
 		c.baseURL = baseURL
+	}
+}
+
+// WithDecoder registers a decoder for the given content type, overriding the default if one exists.
+func WithDecoder(contentType string, decoder Decoder) Option {
+	return func(c *Client) {
+		c.decoders[contentType] = decoder
 	}
 }
 
@@ -61,7 +70,9 @@ func NewClient(options ...Option) (*Client, error) {
 		httpClient: &http.Client{},
 		timeout:    time.Second * 30,
 		headers:    make(map[string]string),
+		decoders:   make(map[string]Decoder, len(defaultDecoders)),
 	}
+	maps.Copy(c.decoders, defaultDecoders)
 
 	for _, opt := range options {
 		opt(c)

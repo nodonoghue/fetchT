@@ -66,9 +66,8 @@ func WithEncoder(encoder Encoder) RequestOption {
 	}
 }
 
-// WithDecoder adds a decoder, or overrides a registered decoder in the internal decoder
-// registry.
-func WithDecoder(contentType string, decoder Decoder) RequestOption {
+// WithDecoders adds a per-request decoder, or overrides a registered decoder for this request.
+func WithDecoders(contentType string, decoder Decoder) RequestOption {
 	return func(c *RequestOptions) {
 		c.decoders[contentType] = decoder
 	}
@@ -105,11 +104,7 @@ func doWithoutBody[R any](ctx context.Context, client *Client, method string, op
 	reqOptions := &RequestOptions{
 		queryParams: make(map[string]string),
 		headers:     make(map[string]string),
-		decoders: map[string]Decoder{
-			"application/json": JSONDecoder,
-			"application/xml":  XMLDecoder,
-			"text/xml":         XMLDecoder,
-		},
+		decoders:    make(map[string]Decoder),
 	}
 	for _, opt := range opts {
 		opt(reqOptions)
@@ -124,7 +119,7 @@ func doWithoutBody[R any](ctx context.Context, client *Client, method string, op
 	if err != nil {
 		return nil, err
 	}
-	return handleResponse[R](resp, reqOptions)
+	return handleResponse[R](resp, client, reqOptions)
 }
 
 func doWithBody[T any, R any](ctx context.Context, client *Client, method string, request T, opts ...RequestOption) (*Response[R], error) {
@@ -132,11 +127,7 @@ func doWithBody[T any, R any](ctx context.Context, client *Client, method string
 		queryParams: make(map[string]string),
 		headers:     make(map[string]string),
 		encoder:     JSONEncoder,
-		decoders: map[string]Decoder{
-			"application/json": JSONDecoder,
-			"application/xml":  XMLDecoder,
-			"text/xml":         XMLDecoder,
-		},
+		decoders:    make(map[string]Decoder),
 	}
 	for _, opt := range opts {
 		opt(reqOptions)
@@ -156,10 +147,10 @@ func doWithBody[T any, R any](ctx context.Context, client *Client, method string
 	if err != nil {
 		return nil, err
 	}
-	return handleResponse[R](resp, reqOptions)
+	return handleResponse[R](resp, client, reqOptions)
 }
 
-func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (*Response[R], error) {
+func handleResponse[R any](resp *http.Response, client *Client, reqOptions *RequestOptions) (*Response[R], error) {
 	defer resp.Body.Close()
 
 	var b []byte
@@ -219,11 +210,14 @@ func handleResponse[R any](resp *http.Response, reqOptions *RequestOptions) (*Re
 
 	decoder, ok := reqOptions.decoders[mediaType]
 	if !ok {
+		decoder, ok = client.decoders[mediaType]
+	}
+	if !ok {
 		return response, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
 			Body:       b,
-			Err:        fmt.Errorf("no registered decoders for %s, register one using WithDecoder()", mediaType),
+			Err:        fmt.Errorf("no registered decoder for %s, register one using WithDecoder()", mediaType),
 		}
 	}
 
@@ -285,4 +279,8 @@ func (e *HTTPError) Error() string {
 		return fmt.Sprintf("HTTP error: %d %s: %s: %v", e.StatusCode, e.Status, string(e.Body), e.Err)
 	}
 	return fmt.Sprintf("HTTP error: %d %s: %s", e.StatusCode, e.Status, e.Body)
+}
+
+func (e *HTTPError) Unwrap() error {
+	return e.Err
 }
