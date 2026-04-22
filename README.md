@@ -2,7 +2,7 @@
 
 A generic HTTP client library for Go. Uses generics to encode request bodies and decode response bodies into typed structs, with pluggable encoders and decoders for different content types.
 
-Requires Go 1.19+.
+Requires Go 1.21+.
 
 ## Installation
 
@@ -40,6 +40,7 @@ All configuration is passed to `NewClient` as functional options. `NewClient` re
 |---|---|
 | `WithBaseURL(url string)` | **Required.** Sets the base URL for all requests. |
 | `WithHeader(key, value string)` | Adds a default header applied to every request. |
+| `WithDecoder(contentType string, d Decoder)` | Registers or overrides a decoder in the client's decoder registry. |
 | `WithTimeout(d time.Duration)` | Sets the request timeout. Default: 30s. |
 | `WithTransport(t *http.Transport)` | Replaces the default HTTP transport. |
 | `WithTLSConfig(c *tls.Config)` | Configures TLS on the client's transport. |
@@ -133,7 +134,7 @@ Each request function accepts `...RequestOption` to configure that individual ca
 | `WithQueryParams(key, value string)` | Adds a query string parameter. Repeatable. |
 | `WithHeaders(key, value string)` | Adds a per-request header, overriding any client-level default with the same key. |
 | `WithEncoder(e Encoder)` | Sets the request body encoder for this request. Default: JSON. |
-| `WithDecoder(contentType string, d Decoder)` | Adds or overrides a decoder in the registry for this request. |
+| `WithDecoders(contentType string, d Decoder)` | Adds or overrides a decoder for this request only, taking priority over the client registry. |
 
 ```go
 users, err := fetcht.Get[[]User](ctx, client,
@@ -183,7 +184,7 @@ type Encoder interface {
 
 ## Decoding Responses
 
-Response decoding is driven by the `Content-Type` header of the server response. Each client holds an internal decoder registry (`map[string]Decoder`) keyed by MIME type. The correct decoder is selected automatically at runtime using `mime.ParseMediaType`.
+Response decoding is driven by the `Content-Type` header of the server response. Each client holds a decoder registry (`map[string]Decoder`) keyed by MIME type. The correct decoder is selected automatically at runtime using `mime.ParseMediaType`.
 
 Built-in decoders registered by default:
 
@@ -193,13 +194,22 @@ Built-in decoders registered by default:
 | `application/xml` | `fetcht.XMLDecoder` |
 | `text/xml` | `fetcht.XMLDecoder` |
 
-Additional decoders can be registered per-request with `WithDecoder`. This is also how you override a built-in, or alias one MIME type to an existing decoder:
+**Client-level registration** via `WithDecoder` applies to every request made by that client. Use this for vendor media types or to override a built-in:
 
 ```go
-// Register a custom decoder for a vendor media type
+// Register once — applies to all requests on this client
+client, err := fetcht.NewClient(
+    fetcht.WithBaseURL("https://api.example.com"),
+    fetcht.WithDecoder("application/vnd.api+json", fetcht.JSONDecoder),
+)
+```
+
+**Per-request override** via `WithDecoders` applies only to that call and takes priority over the client registry:
+
+```go
 resp, err := fetcht.Get[MyType](ctx, client,
     fetcht.WithPath("/resource"),
-    fetcht.WithDecoder("application/vnd.api+json", fetcht.JSONDecoder),
+    fetcht.WithDecoders("application/vnd.api+json", fetcht.JSONDecoder),
 )
 ```
 
@@ -241,5 +251,5 @@ if err != nil {
 
 ## Known Limitations
 
-- **204 No Content returns the zero value of `R`.** When `R` is a struct, the returned value is indistinguishable from a successful response with an empty body. Use a pointer type (`*MyStruct`) if you need to tell the two apart — a nil pointer unambiguously means no content.
+- **No response streaming.** The library always reads the full response body into memory before decoding. This is a fundamental constraint of decoding into a typed `R` — the decoder needs the complete document. For use cases that require a live reader (large file downloads, server-sent events, NDJSON streams), use `net/http` directly.
 - **`go-querystring` dependency.** `FormEncoder` depends on `github.com/google/go-querystring`. The library is not pure stdlib.
