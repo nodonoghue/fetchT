@@ -2,7 +2,7 @@
 
 A generic HTTP client library for Go. Uses generics to encode request bodies and decode response bodies into typed structs, with pluggable encoders and decoders for different content types.
 
-Requires Go 1.18+.
+Requires Go 1.19+.
 
 ## Installation
 
@@ -58,15 +58,15 @@ All request functions are free functions parameterised on the response type `R`.
 
 ```go
 // GET — no request body
-Get[R any](ctx, client, ...RequestOption) (*Response[R], error)
+Get[R any](ctx context.Context, client *Client, ...RequestOption) (*Response[R], error)
 
 // DELETE — no request body
-Delete[R any](ctx, client, ...RequestOption) (*Response[R], error)
+Delete[R any](ctx context.Context, client *Client, ...RequestOption) (*Response[R], error)
 
 // POST / PUT / PATCH — encodes request body
-Post[T, R any](ctx, client, request T, ...RequestOption) (*Response[R], error)
-Put[T, R any](ctx, client, request T, ...RequestOption) (*Response[R], error)
-Patch[T, R any](ctx, client, request T, ...RequestOption) (*Response[R], error)
+Post[T any, R any](ctx context.Context, client *Client, request T, ...RequestOption) (*Response[R], error)
+Put[T any, R any](ctx context.Context, client *Client, request T, ...RequestOption) (*Response[R], error)
+Patch[T any, R any](ctx context.Context, client *Client, request T, ...RequestOption) (*Response[R], error)
 ```
 
 ### The Response Struct
@@ -84,6 +84,7 @@ type Response[R any] struct {
     Request       *http.Request  // The final request object
     ContentLength int64          // Value of Content-Length header
     RawBody       []byte         // Raw un-decoded response body
+    HasBody       bool           // True if the response body was non-empty
 }
 ```
 
@@ -161,9 +162,14 @@ Built-in encoders:
 `MultipartEncoder` requires the request value to be a `fetcht.MultipartForm`:
 
 ```go
+type FilePart struct {
+    Reader io.Reader
+    Name   string
+}
+
 type MultipartForm struct {
     Fields map[string]string
-    Files  map[string]FilePart  // FilePart{Reader io.Reader, Name string}
+    Files  map[string]FilePart
 }
 ```
 
