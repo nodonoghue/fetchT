@@ -1,3 +1,15 @@
+// Package fetcht is a generic HTTP client library: request and response bodies
+// are typed by the caller and (de)serialized through pluggable Encoder/Decoder
+// implementations.
+//
+// The verb entry points (Get, Delete, Post, Put, Patch) are package-level
+// functions that take a *Client, rather than methods on *Client. This is a
+// language constraint, not a stylistic choice: Go does not permit a method to
+// introduce a type parameter that is not already declared on its receiver, so
+// `func (c *Client) Get[R any](...)` does not compile. Free functions are the
+// only way to parameterize the response type R (and, for body verbs, the
+// request type T) per call while still threading client-level configuration
+// through.
 package fetcht
 
 import (

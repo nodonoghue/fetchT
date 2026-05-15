@@ -91,6 +91,20 @@ type Response[R any] struct {
 
 > **Note:** Go does not allow generic methods with new type parameters on a receiver, so these are package-level functions rather than methods on `Client`. This is a known language constraint, not a design choice.
 
+#### Empty-body responses
+
+When a 2xx response has `Content-Length: 0` (e.g. `204 No Content`), the body read and decoder dispatch are both skipped. `Data` is the zero value of `R`, `RawBody` is `nil`, and `HasBody` is `false`. Use `HasBody` (or `StatusCode`) to distinguish "the server sent no body" from "the server sent a body that decoded to a zero-value struct":
+
+```go
+resp, err := fetcht.Delete[Order](ctx, client, fetcht.WithPath("/orders/99"))
+if err != nil {
+    return err
+}
+if !resp.HasBody {
+    // 204 or otherwise empty — resp.Data is the zero Order
+}
+```
+
 ### Examples
 
 ```go
