@@ -9,7 +9,16 @@ import (
 	"mime"
 	"net/http"
 	"net/url"
+	"sync"
 )
+
+// maxPooledBuf caps the capacity of buffers returned to readBufPool. Without it,
+// a single oversized response would park a large buffer in the pool indefinitely.
+const maxPooledBuf = 1 << 20 // 1 MiB
+
+// readBufPool reuses response-body buffers across requests to avoid an
+// allocation (and io.ReadAll's grow-and-realloc churn) per response.
+var readBufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
 // Response contains the decoded response body and metadata from the HTTP response.
 type Response[R any] struct {
@@ -31,6 +40,7 @@ type RequestOptions struct {
 	headers     map[string]string
 	encoder     Encoder
 	decoders    map[string]Decoder
+	keepRawBody bool
 }
 
 // RequestOption is a functional option for configuring an individual request.
@@ -63,6 +73,16 @@ func WithHeaders(key, value string) RequestOption {
 func WithEncoder(encoder Encoder) RequestOption {
 	return func(r *RequestOptions) {
 		r.encoder = encoder
+	}
+}
+
+// WithRawBody retains the raw response bytes in Response.RawBody. It is off by
+// default so the response-body buffer can be pooled and reused; opt in only when
+// a caller actually needs the unparsed bytes (the error path always populates
+// HTTPError.Body regardless of this setting).
+func WithRawBody() RequestOption {
+	return func(r *RequestOptions) {
+		r.keepRawBody = true
 	}
 }
 
@@ -153,17 +173,42 @@ func doWithBody[T any, R any](ctx context.Context, client *Client, method string
 func handleResponse[R any](resp *http.Response, client *Client, reqOptions *RequestOptions) (*Response[R], error) {
 	defer resp.Body.Close()
 
-	var b []byte
-	var err error
+	buf := readBufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer func() {
+		// Don't pin an oversized buffer in the pool.
+		if buf.Cap() <= maxPooledBuf {
+			readBufPool.Put(buf)
+		}
+	}()
+
 	if resp.ContentLength != 0 {
-		b, err = io.ReadAll(resp.Body)
-		if err != nil {
+		if _, err := buf.ReadFrom(resp.Body); err != nil {
 			return nil, &HTTPError{
 				StatusCode: resp.StatusCode,
 				Status:     resp.Status,
 				Err:        fmt.Errorf("failed to read HTTP response body: %w", err),
 			}
 		}
+	}
+
+	hasBody := buf.Len() > 0
+
+	// snapshot copies bytes out of the pooled buffer. Anything handed back to the
+	// caller (RawBody, HTTPError.Body) must be copied, since buf is reused once
+	// this function returns.
+	snapshot := func() []byte {
+		if buf.Len() == 0 {
+			return nil
+		}
+		b := make([]byte, buf.Len())
+		copy(b, buf.Bytes())
+		return b
+	}
+
+	var raw []byte
+	if reqOptions.keepRawBody {
+		raw = snapshot()
 	}
 
 	response := &Response[R]{
@@ -174,19 +219,19 @@ func handleResponse[R any](resp *http.Response, client *Client, reqOptions *Requ
 		Cookies:       resp.Cookies(),
 		Request:       resp.Request,
 		ContentLength: resp.ContentLength,
-		RawBody:       b,
-		HasBody:       len(b) > 0,
+		RawBody:       raw,
+		HasBody:       hasBody,
 	}
 
 	if resp.StatusCode < 200 || resp.StatusCode > 299 {
 		return response, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
-			Body:       b,
+			Body:       snapshot(),
 		}
 	}
 
-	if !response.HasBody {
+	if !hasBody {
 		return response, nil
 	}
 
@@ -195,7 +240,7 @@ func handleResponse[R any](resp *http.Response, client *Client, reqOptions *Requ
 		return response, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
-			Body:       b,
+			Body:       snapshot(),
 			Err:        errors.New("server response did not include a Content-Type header"),
 		}
 	}
@@ -203,7 +248,7 @@ func handleResponse[R any](resp *http.Response, client *Client, reqOptions *Requ
 		return response, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
-			Body:       b,
+			Body:       snapshot(),
 			Err:        fmt.Errorf("failed to parse content type from server response: %w", err),
 		}
 	}
@@ -216,16 +261,19 @@ func handleResponse[R any](resp *http.Response, client *Client, reqOptions *Requ
 		return response, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
-			Body:       b,
+			Body:       snapshot(),
 			Err:        fmt.Errorf("no registered decoder for %s, register one using WithDecoder()", mediaType),
 		}
 	}
 
-	if err := decoder.Decode(bytes.NewReader(b), &response.Data); err != nil {
+	// bytes.NewReader does not copy the data — it reads over buf's slice without
+	// draining buf, so the bytes remain available for snapshot() on a decode
+	// error and buf stays clean to return to the pool.
+	if err := decoder.Decode(bytes.NewReader(buf.Bytes()), &response.Data); err != nil {
 		return response, &HTTPError{
 			StatusCode: resp.StatusCode,
 			Status:     resp.Status,
-			Body:       b,
+			Body:       snapshot(),
 			Err:        fmt.Errorf("failed to decode response body for status %d: %w", resp.StatusCode, err),
 		}
 	}

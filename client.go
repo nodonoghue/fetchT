@@ -16,9 +16,32 @@ import (
 	"crypto/tls"
 	"errors"
 	"maps"
+	"net"
 	"net/http"
 	"time"
 )
+
+const defaultMaxIdleConnsPerHost = 100
+
+// defaultTransport mirrors http.DefaultTransport but raises MaxIdleConnsPerHost
+// from the standard library default of 2. Under concurrency that default forces
+// idle connections to be closed and re-dialed, paying a fresh TCP+TLS handshake
+// per request — the dominant cost in a high-traffic client.
+func defaultTransport() *http.Transport {
+	return &http.Transport{
+		Proxy: http.ProxyFromEnvironment,
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		MaxIdleConnsPerHost:   defaultMaxIdleConnsPerHost,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+}
 
 // Client is an HTTP client with default configuration applied to all requests.
 type Client struct {
@@ -95,7 +118,7 @@ func NewClient(options ...Option) (*Client, error) {
 	}
 
 	if c.transport == nil {
-		c.transport = &http.Transport{}
+		c.transport = defaultTransport()
 	}
 	if c.tlsConfig != nil {
 		c.transport.TLSClientConfig = c.tlsConfig
